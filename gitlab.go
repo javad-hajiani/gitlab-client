@@ -6,8 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -18,22 +21,26 @@ var (
 )
 
 type gitlabkeys struct {
-	Id   int
-	Name string
+	Id    int
+	Name  string
+	Title string
 }
 
-func gitlab(url string, datastring string, token string) []gitlabkeys {
+func gitlab(url string, datastring map[string]interface{}, token string) []gitlabkeys {
 	var (
 		req    *http.Request
 		resp   *http.Response
 		err    error
 		result []gitlabkeys
 	)
-	if datastring != "" {
-		var jsonStr = []byte(`{"name":` + `"` + datastring + `"` + `}`)
+	if datastring != nil {
+		var jsonStr, err = json.Marshal(datastring)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
 		req, err = http.NewRequest("POST", url, bytes.NewBuffer(jsonStr))
-	} else
-	{
+	} else {
 		var jsonStr = []byte(``)
 		req, err = http.NewRequest("GET", url, bytes.NewBuffer(jsonStr))
 	}
@@ -70,6 +77,8 @@ func getarg() bool {
 		Listprojects()
 	case "search":
 		Searchprojects()
+	case "deploykey":
+		Enable_deploy_key()
 	default:
 		fmt.Printf("%q is not valid command.\n", os.Args[1])
 		os.Exit(2)
@@ -86,7 +95,7 @@ func Listprojects() bool {
 	listcmd.Parse(os.Args[2:])
 	if *host != "" && *token != "" {
 		url := string(*host) + "/api/v4/projects"
-		projects = gitlab(url, "", *token)
+		projects = gitlab(url, nil, *token)
 		for value := range projects {
 			fmt.Printf("repository with id %d and name :%s\n", projects[value].Id, projects[value].Name)
 		}
@@ -105,7 +114,7 @@ func Searchprojects() string {
 	if *key != "" && *host != "" && *token != "" {
 
 		url := string(*host) + "/api/v4/projects"
-		projects = gitlab(url, "", *token)
+		projects = gitlab(url, nil, *token)
 		for value := range projects {
 			if strings.Contains(*key, projects[value].Name) == true {
 				fmt.Printf("we found this one : id:%d\tname:%s\n", projects[value].Id, projects[value].Name)
@@ -118,6 +127,42 @@ func Searchprojects() string {
 	return ""
 }
 
+func Enable_deploy_key() string {
+	var projects []gitlabkeys
+	var key_id int
+	deploycmd := flag.NewFlagSet("deploy", flag.ExitOnError)
+	host = deploycmd.String("host", "", "Enter Gitlab Host")
+	token = deploycmd.String("token", "", "Enter Gitlab AccessToken")
+	key = deploycmd.String("deploykey", "", "Enter DeployKey ;)")
+	group := deploycmd.String("group", "", "Enter group for enable ;)")
+	deploycmd.Parse(os.Args[2:])
+	fmt.Println(*group)
+	if *key != "" && *host != "" && *token != "" && *group != "" {
+		url := string(*host) + "/api/v4/groups/" + *group + "/projects"
+		deploykeysurl := string(*host) + "/api/v4/deploy_keys"
+		deploykeys := gitlab(deploykeysurl, nil, *token)
+		projects = gitlab(url, nil, *token)
+		for deploykey := range deploykeys {
+			if strings.Contains(*key, deploykeys[deploykey].Title) {
+				key_id = deploykeys[deploykey].Id
+			}
+		}
+		if key_id != 0 {
+
+			for value := range projects {
+				jsondata := map[string]interface{}{"key": strconv.Itoa(projects[value].Id), "key_id": strconv.Itoa(key_id)}
+				enable_key_url := string(*host) + "/api/v4/projects/" + strconv.Itoa(projects[value].Id) + "/deploy_keys/" + strconv.Itoa(key_id) + "/enable"
+				fmt.Println(enable_key_url, reflect.TypeOf(jsondata))
+				enable_result := gitlab(enable_key_url, jsondata, *token)
+				fmt.Printf("we found this one : id:%d\tname:%s\n and result = %s\n", projects[value].Id, projects[value].Name, enable_result)
+			}
+		}
+	} else {
+		deploycmd.PrintDefaults()
+	}
+
+	return ""
+}
 func main() {
 	getarg()
 
